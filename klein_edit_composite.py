@@ -899,8 +899,8 @@ class KleinEditComposite:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "original_image":  ("IMAGE",),
                 "generated_image": ("IMAGE",),
+                "original_image": ("IMAGE",),
                 # --- Detection ---
                 "delta_e_threshold": ("FLOAT", {
                     "default": -1.0, "min": -1.0, "max": 100.0, "step": 1.0,
@@ -1083,11 +1083,25 @@ class KleinEditComposite:
     FUNCTION      = "run"
     OUTPUT_NODE   = True
 
-    def run(self, original_image, generated_image,
-            delta_e_threshold=-1.0, grow_mask_pct=0.0, feather_pct=2.0, color_match_blend=1.0,
-            flow_quality="medium", occlusion_threshold=-1.0,
-            close_radius_pct=0.5, noise_removal_pct=0.0, max_islands=0,
-            fill_holes=False, fill_borders=True, use_occlusion=False, enable_debug=False, custom_mask=None):
+    def run(
+        self,
+        generated_image,
+        original_image,
+        delta_e_threshold=-1.0,
+        grow_mask_pct=0.0,
+        feather_pct=2.0,
+        color_match_blend=1.0,
+        flow_quality="medium",
+        occlusion_threshold=-1.0,
+        close_radius_pct=0.5,
+        noise_removal_pct=0.0,
+        max_islands=0,
+        fill_holes=False,
+        fill_borders=True,
+        use_occlusion=False,
+        enable_debug=False,
+        custom_mask=None,
+    ):
 
         orig_np = original_image[0].cpu().float().numpy()
         gen_np  = generated_image[0].cpu().float().numpy()
