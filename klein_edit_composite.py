@@ -302,37 +302,37 @@ def _compute_diff_map(orig_np: np.ndarray, gen_np: np.ndarray, blur_kernel: tupl
 
 def _seamless_blend(orig_float: np.ndarray, gen_float: np.ndarray, mask_float: np.ndarray) -> np.ndarray:
     """
-    Uses Poisson Blending (cv2.seamlessClone) to match lighting/color across boundaries, 
+    Uses Poisson Blending (cv2.seamlessClone) to match lighting/color across boundaries,
     then applies an Alpha Blend using the smoothed mask for perfect edges.
     """
     orig_u8 = (np.clip(orig_float, 0, 1) * 255).astype(np.uint8)
     gen_u8  = (np.clip(gen_float, 0, 1) * 255).astype(np.uint8)
-    
+
     # Create binary mask for Poisson (> 0.1 to encompass the internal feathering zone)
     binary_mask = (mask_float > 0.1).astype(np.uint8) * 255
-    
+
     # Avoid OpenCV crash: the mask should never touch the exact 1px image boundaries
     binary_mask[0, :] = 0; binary_mask[-1, :] = 0
     binary_mask[:, 0] = 0; binary_mask[:, -1] = 0
-    
+
     # FIX FOR PIXEL SHIFTING:
-    # We must calculate the center using cv2.boundingRect exactly as cv2.seamlessClone 
+    # We must calculate the center using cv2.boundingRect exactly as cv2.seamlessClone
     # calculates it internally. Using numpy min/max math causes a 1-pixel shift mismatch.
     x, y, w, h = cv2.boundingRect(binary_mask)
     m3 = mask_float[..., np.newaxis]
-    
+
     # If the mask is empty, return standard Alpha blend
     if w == 0 or h == 0:
         return np.clip(orig_float * (1.0 - m3) + gen_float * m3, 0, 1)
-        
+
     # Calculate the exact mathematical center expected by OpenCV
     center = (x + w // 2, y + h // 2)
-    
+
     try:
         # NORMAL_CLONE mathematically matches the internal gradients to the background (orig)
         cloned_u8 = cv2.seamlessClone(gen_u8, orig_u8, binary_mask, center, cv2.NORMAL_CLONE)
         cloned_float = cloned_u8.astype(np.float32) / 255.0
-        
+
         # Final Fusion: Alpha blend between original and the lighting-corrected Poisson clone
         return np.clip(orig_float * (1.0 - m3) + cloned_float * m3, 0, 1)
     except Exception:
@@ -634,7 +634,7 @@ def _composite(original_np: np.ndarray,
                fill_borders: bool = True,
                custom_mask: np.ndarray = None,
                custom_mask_mode: str = "replace",
-               use_poisson_blending: bool = True,
+               poisson_blend_edges: bool = False,
                debug: bool = False) -> tuple:
 
     H, W = original_np.shape[:2]
@@ -696,7 +696,7 @@ def _composite(original_np: np.ndarray,
         )
         if color_matched: auto_report['color_match_applied'] = True
 
-        if use_poisson_blending:
+        if poisson_blend_edges:
             result = _seamless_blend(original_np, gen_pre, composite_mask)
         else:
             m3     = composite_mask[..., np.newaxis]
@@ -731,7 +731,7 @@ def _composite(original_np: np.ndarray,
             "pass1_inliers":  inliers,
             "pass2_used":     False,
             "custom_mask":    True,
-            "poisson_used":   use_poisson_blending,
+            "poisson_used":   poisson_blend_edges,
         }
         stats.update(auto_report)
 
@@ -914,7 +914,7 @@ def _composite(original_np: np.ndarray,
     )
     if color_matched: auto_report['color_match_applied'] = True
 
-    if use_poisson_blending:
+    if poisson_blend_edges:
         result = _seamless_blend(original_np, final_aligned_gen, composite_mask)
     else:
         m3     = composite_mask[..., np.newaxis]
@@ -934,7 +934,7 @@ def _composite(original_np: np.ndarray,
         "diagonal_px":    round(diag),
         "pass1_inliers":  inliers_1,
         "pass2_used":     pass2_used,
-        "poisson_used":   use_poisson_blending,
+        "poisson_used":   poisson_blend_edges,
     }
     stats.update(auto_report)
 
@@ -1105,15 +1105,6 @@ class KleinEditComposite:
                         "so growth and feather work together to produce a clean edge."
                     ),
                 }),
-                # --- Output ---
-                "use_poisson_blending": ("BOOLEAN", {
-                    "default": True, 
-                    "tooltip": (
-                        "Uses Poisson Blending (cv2.seamlessClone) to mathematically eliminate lighting "
-                        "and color seams introduced by the AI model. If disabled, uses the original "
-                        "author's standard Alpha Blending."
-                    )
-                }),
                 "feather_pct": ("FLOAT", {
                     "default": 2.0, "min": 0.0, "max": 10.0, "step": 0.25,
                     "tooltip": (
@@ -1141,6 +1132,13 @@ class KleinEditComposite:
                         "Set to 0.0 to disable color matching entirely — use this if the generated image's "
                         "color shift is intentional (e.g. a day-to-night conversion)."
                     ),
+                }),
+                "poisson_blend_edges": ("BOOLEAN", {
+                    "default": False, 
+                    "tooltip": (
+                        "Uses Poisson Blending (cv2.seamlessClone) to mathematically eliminate lighting "
+                        "and color seams introduced by the AI model. If disabled, uses alpha blending. "
+                    )
                 }),
             },
             "optional": {
@@ -1190,7 +1188,7 @@ class KleinEditComposite:
             flow_quality="medium", occlusion_threshold=-1.0,
             close_radius_pct=0.5, noise_removal_pct=0.0, max_islands=0,
             fill_holes=False, fill_borders=True, use_occlusion=False, enable_debug=False,
-            custom_mask=None, custom_mask_mode="replace", use_poisson_blending=True):
+            custom_mask=None, custom_mask_mode="replace", poisson_blend_edges=False):
 
         orig_np = original_image[0].cpu().float().numpy()
         gen_np  = generated_image[0].cpu().float().numpy()
@@ -1231,7 +1229,7 @@ class KleinEditComposite:
             color_match_blend   = color_match_blend,
             custom_mask         = custom_mask_np,
             custom_mask_mode    = custom_mask_mode,
-            use_poisson_blending = use_poisson_blending,
+            poisson_blend_edges = poisson_blend_edges,
             debug               = enable_debug,
         )
 
